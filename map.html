@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPS Route Telemetry</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root {
+      --low: #10b981;
+      --mid: #fbbf24;
+      --high: #f43f5e;
+      --bg: #0b1120;
+      --panel: rgba(15, 23, 42, 0.86);
+      --panel-border: rgba(148, 163, 184, 0.18);
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --chip: rgba(30, 41, 59, 0.9);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Segoe UI", sans-serif;
+    }
+    #map { position: absolute; inset: 0; z-index: 0; }
+
+    .panel {
+      position: absolute;
+      z-index: 1000;
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--panel-border);
+      border-radius: 18px;
+      box-shadow: 0 14px 36px rgba(0, 0, 0, 0.45);
+    }
+
+    .header-panel {
+      top: 20px; left: 20px;
+      padding: 14px 18px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .logo-box {
+      width: 42px; height: 42px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #06b6d4, #3b82f6);
+      display: grid; place-items: center;
+      font-size: 20px;
+      box-shadow: 0 6px 16px rgba(6, 182, 212, 0.3);
+    }
+    .header-panel h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+    .header-panel p  { margin: 3px 0 0; font-size: 12.5px; color: var(--muted); }
+
+    .side-panel {
+      top: 20px; right: 20px;
+      width: 280px;
+      padding: 18px;
+    }
+    .side-panel h2 {
+      margin: 0 0 12px;
+      font-size: 12px; font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.8px;
+    }
+    .kpi-grid {
+      display: grid; grid-template-columns: repeat(2, 1fr);
+      gap: 8px; margin-bottom: 16px;
+    }
+    .kpi {
+      background: var(--chip);
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      border-radius: 12px;
+      padding: 10px;
+    }
+    .kpi span { display: block; font-size: 11px; color: var(--muted); }
+    .kpi b { display: block; margin-top: 3px; font-size: 17px; font-weight: 700; }
+
+    .dist-row {
+      display: flex; align-items: center; gap: 8px;
+      margin: 9px 0; font-size: 12.5px;
+    }
+    .dist-row .name { width: 42px; font-weight: 600; color: #e2e8f0; }
+    .track {
+      flex: 1; height: 7px;
+      background: rgba(148, 163, 184, 0.16);
+      border-radius: 99px; overflow: hidden;
+    }
+    .fill { height: 100%; border-radius: 99px; transition: width 0.5s ease; }
+    .dist-row .num { width: 32px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+    .action-btn {
+      margin-top: 14px; width: 100%;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 11px;
+      padding: 10px;
+      background: rgba(59, 130, 246, 0.2);
+      color: #e0f2fe;
+      font-size: 13px; font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .action-btn:hover { background: rgba(59, 130, 246, 0.34); }
+    .action-btn:active { transform: scale(0.98); }
+
+    .filter-bar {
+      bottom: 24px; left: 20px;
+      padding: 10px 14px;
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12.5px;
+    }
+    .filter-tip { color: var(--muted); font-size: 11.5px; margin-right: 4px; }
+    .chip-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 11px;
+      border-radius: 99px;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      background: var(--chip);
+      color: var(--text);
+      font-size: 12px; font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s, border-color 0.15s;
+    }
+    .chip-btn.dimmed { opacity: 0.4; }
+    .chip-btn.active { border-color: #fff; box-shadow: 0 0 0 1px rgba(255,255,255,0.25); }
+    .dot { width: 9px; height: 9px; border-radius: 50%; }
+
+    .leaflet-popup-content-wrapper {
+      background: #0f172a;
+      color: #f8fafc;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 12px;
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+    }
+    .leaflet-popup-tip { background: #0f172a; }
+    .leaflet-popup-content { margin: 12px 14px; font-size: 13px; line-height: 1.6; }
+    .pop-head { font-weight: 700; margin-bottom: 4px; }
+    .tag {
+      display: inline-block; padding: 1px 8px;
+      border-radius: 99px; color: #0b1120;
+      font-size: 11px; font-weight: 800; margin-left: 5px;
+    }
+    .pop-meta { color: var(--muted); font-size: 12px; }
+
+    .pin {
+      color: #fff; font-size: 11px; font-weight: 800;
+      padding: 4px 10px; border-radius: 99px;
+      border: 2px solid rgba(255, 255, 255, 0.85);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+      white-space: nowrap;
+    }
+
+    @media (max-width: 760px) {
+      .side-panel { top: auto; bottom: 84px; right: 12px; left: 12px; width: auto; }
+      .header-panel { top: 12px; left: 12px; right: 12px; }
+      .filter-bar { bottom: 16px; left: 12px; right: 12px; flex-wrap: wrap; }
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div class="panel header-panel">
+    <div class="logo-box">🧭</div>
+    <div>
+      <h1>GPS Route Telemetry</h1>
+      <p id="subtitle">경로 데이터를 불러오는 중...</p>
+    </div>
+  </div>
+
+  <aside class="panel side-panel">
+    <h2>Telemetry Summary</h2>
+    <div class="kpi-grid">
+      <div class="kpi"><span>평균 속도</span><b id="kpi-avg">-</b></div>
+      <div class="kpi"><span>총 이동 거리</span><b id="kpi-dist">-</b></div>
+      <div class="kpi"><span>최고 속도</span><b id="kpi-max">-</b></div>
+      <div class="kpi"><span>최저 속도</span><b id="kpi-min">-</b></div>
+    </div>
+    <div id="bars"></div>
+    <button class="action-btn" id="resetBtn">전체 경로 보기</button>
+  </aside>
+
+  <div class="panel filter-bar" id="filterBar">
+    <span class="filter-tip">구간 필터:</span>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // ===== 속도 구간 기준 =====
+    const LOW_MAX = 16;
+    const MID_MAX = 20;
+
+    const LEVELS = {
+      Low:  { color: '#10b981' },
+      Mid:  { color: '#fbbf24' },
+      High: { color: '#f43f5e' }
+    };
+
+    function getLevel(speed) {
+      if (speed <= LOW_MAX) return 'Low';
+      if (speed <= MID_MAX) return 'Mid';
+      return 'High';
+    }
+
+    // 두 좌표 간 거리(km) - Haversine 공식
+    function calcDistanceKm(a, b) {
+      const R = 6371;
+      const toRad = deg => deg * Math.PI / 180;
+      const dLat = toRad(b.latitude - a.latitude);
+      const dLon = toRad(b.longitude - a.longitude);
+      const lat1 = toRad(a.latitude);
+      const lat2 = toRad(b.latitude);
+      const h = Math.sin(dLat / 2) ** 2 +
+                Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(h));
+    }
+
+    const map = L.map('map', { zoomControl: false });
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    function createPin(label, bg) {
+      return L.divIcon({
+        className: '',
+        html: `<div class="pin" style="background:${bg}">${label}</div>`,
+        iconSize: [64, 24],
+        iconAnchor: [32, 12]
+      });
+    }
+
+    let bounds;
+    let activeLevel = null;
+    const segmentLayers = [];
+    const markerLayers = [];
+    const chipButtons = {};
+
+    function applyFilter(level) {
+      activeLevel = activeLevel === level ? null : level;
+
+      Object.entries(chipButtons).forEach(([name, btn]) => {
+        btn.classList.toggle('active', activeLevel === name);
+        btn.classList.toggle('dimmed', activeLevel !== null && activeLevel !== name);
+      });
+
+      segmentLayers.forEach(({ line, glow, segLevel }) => {
+        const matched = !activeLevel || segLevel === activeLevel;
+        glow.setStyle({ opacity: matched ? 0.35 : 0.06 });
+        line.setStyle({ opacity: matched ? 0.95 : 0.15 });
+      });
+
+      markerLayers.forEach(({ marker, level: ptLevel }) => {
+        const matched = !activeLevel || ptLevel === activeLevel;
+        marker.setStyle({
+          opacity: matched ? 1 : 0.2,
+          fillOpacity: matched ? 0.95 : 0.15
+        });
+      });
+    }
+
+    // 필터 칩 생성
+    const filterBar = document.getElementById('filterBar');
+    Object.keys(LEVELS).forEach(name => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'chip-btn';
+      btn.innerHTML = `<span class="dot" style="background:${LEVELS[name].color}"></span>${name}`;
+      btn.onclick = () => applyFilter(name);
+      filterBar.appendChild(btn);
+      chipButtons[name] = btn;
+    });
+
+    fetch('output.json')
+      .then(res => res.json())
+      .then(points => {
+        if (!Array.isArray(points) || points.length === 0) {
+          document.getElementById('subtitle').textContent = '표시할 지점 데이터가 없습니다.';
+          return;
+        }
+
+        let totalKm = 0;
+
+        points.forEach((p, idx) => {
+          const match = String(p.info ?? '').match(/\d+/);
+          p.speed = match ? parseInt(match[0], 10) : 0;
+          p.level = getLevel(p.speed);
+          if (idx > 0) {
+            totalKm += calcDistanceKm(points[idx - 1], p);
+          }
+        });
+
+        // 경로 라인 (글로우 + 코어 라인)
+        for (let i = 1; i < points.length; i++) {
+          const a = points[i - 1], b = points[i];
+          const coords = [[a.latitude, a.longitude], [b.latitude, b.longitude]];
+          const color = LEVELS[b.level].color;
+
+          const glow = L.polyline(coords, {
+            color, weight: 11, opacity: 0.35, lineCap: 'round'
+          }).addTo(map);
+
+          const line = L.polyline(coords, {
+            color, weight: 4.5, opacity: 0.95, lineCap: 'round'
+          }).addTo(map);
+
+          segmentLayers.push({ glow, line, segLevel: b.level });
+        }
+
+        // 지점 마커
+        points.forEach((p, i) => {
+          const color = LEVELS[p.level].color;
+          const marker = L.circleMarker([p.latitude, p.longitude], {
+            radius: 7,
+            color: '#0f172a',
+            weight: 2,
+            fillColor: color,
+            fillOpacity: 0.95
+          })
+          .addTo(map)
+          .bindPopup(
+            `<div class="pop-head">Checkpoint #${i + 1}
+               <span class="tag" style="background:${color}">${p.level}</span></div>
+             속도 <b>${p.speed}</b><br>
+             <span class="pop-meta">${p.latitude}, ${p.longitude}</span>`
+          )
+          .on('mouseover', function () { this.setStyle({ radius: 10 }); })
+          .on('mouseout',  function () { this.setStyle({ radius: 7 }); });
+
+          markerLayers.push({ marker, level: p.level });
+        });
+
+        // 출발 / 도착 핀
+        const startPt = points[0];
+        const endPt = points[points.length - 1];
+        L.marker([startPt.latitude, startPt.longitude], {
+          icon: createPin('START', '#0284c7'), zIndexOffset: 1000
+        }).addTo(map);
+        L.marker([endPt.latitude, endPt.longitude], {
+          icon: createPin('END', '#475569'), zIndexOffset: 1000
+        }).addTo(map);
+
+        // 화면 자동 맞춤 및 리셋
+        bounds = L.latLngBounds(points.map(p => [p.latitude, p.longitude]));
+        const fitView = () => {
+          if (activeLevel) applyFilter(activeLevel);
+          map.fitBounds(bounds, {
+            paddingTopLeft: [70, 110],
+            paddingBottomRight: [310, 90]
+          });
+        };
+        fitView();
+        document.getElementById('resetBtn').onclick = fitView;
+
+        // KPI 요약
+        const speeds = points.map(p => p.speed);
+        const avg = (speeds.reduce((acc, v) => acc + v, 0) / speeds.length).toFixed(1);
+        document.getElementById('kpi-avg').textContent = avg;
+        document.getElementById('kpi-dist').textContent = `${totalKm.toFixed(2)} km`;
+        document.getElementById('kpi-max').textContent = Math.max(...speeds);
+        document.getElementById('kpi-min').textContent = Math.min(...speeds);
+        document.getElementById('subtitle').textContent = `총 ${points.length}개 지점 · Live Telemetry`;
+
+        // 구간 분포 바
+        const counts = { Low: 0, Mid: 0, High: 0 };
+        points.forEach(p => { counts[p.level]++; });
+
+        document.getElementById('bars').innerHTML = Object.keys(LEVELS).map(name => {
+          const ratio = (counts[name] / points.length) * 100;
+          return `
+            <div class="dist-row">
+              <span class="name">${name}</span>
+              <div class="track">
+                <div class="fill" style="width:${ratio}%; background:${LEVELS[name].color}"></div>
+              </div>
+              <span class="num">${counts[name]}</span>
+            </div>
+          `;
+        }).join('');
+      })
+      .catch(err => {
+        console.error(err);
+        document.getElementById('subtitle').textContent = 'output.json 로드 실패 (Live Server 확인)';
+      });
+  </script>
+</body>
+</html>
